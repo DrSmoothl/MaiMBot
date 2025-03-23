@@ -114,6 +114,25 @@ class BotConfig:
     memory_ban_words: list = field(
         default_factory=lambda: ["表情包", "图片", "回复", "聊天记录"]
     )  # 添加新的配置项默认值
+    
+    # LPMM记忆系统配置
+    lpmm_enabled: bool = True  # 是否启用LPMM记忆系统
+    lpmm_build_interval: int = 1800  # LPMM记忆构建间隔（秒）
+    lpmm_maintain_interval: int = 7200  # LPMM记忆维护间隔（秒）
+    memory_retrieval_max_num: int = 5  # 记忆检索最大条数
+    memory_update_days: int = 1  # 每次更新时处理多少天的聊天记录
+    memory_update_samples: int = 100  # 每次更新处理的最大样本数
+    memory_retention_days: int = 30  # 记忆保留天数（超过后可能被清理）
+    lpmm_data_dir: str = "./data/lpmm"  # LPMM数据存储目录
+    
+    # LLM模型配置
+    llm_model: Dict[str, str] = field(default_factory=lambda: {
+        "name": "gpt-3.5-turbo",
+        "base_url": "OPENAI_BASE_URL",
+        "key": "OPENAI_KEY",
+        "pri_in": 0.5,
+        "pri_out": 1.5
+    })  # 用于记忆构建的模型
 
     @staticmethod
     def get_config_dir() -> str:

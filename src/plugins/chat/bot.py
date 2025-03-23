@@ -12,7 +12,9 @@ from nonebot.adapters.onebot.v11 import (
     FriendRecallNoticeEvent,
 )
 
-from ..memory_system.memory import hippocampus
+# 使用延迟导入避免循环引用
+# from ..memory_system.memory import hippocampus
+from ..memory_system import init_memory_instances
 from ..moods.moods import MoodManager  # 导入情绪管理器
 from .config import global_config
 from .emoji_manager import emoji_manager  # 导入表情包管理器
@@ -61,6 +63,26 @@ class ChatBot:
         """确保所有任务已启动"""
         if not self._started:
             self._started = True
+
+    async def _memory_judge(self, message: MessageRecv):
+        """判断消息是否激活记忆
+        返回值为浮点数（0~1)"""
+        if message.processed_plain_text is None or len(message.processed_plain_text) < 15:
+            # 消息太短，直接返回0
+            return 0
+        
+        try:
+            # 获取记忆系统实例
+            _, hippocampus, _ = init_memory_instances()
+            
+            # 计算记忆激活值
+            interested_rate = await hippocampus.memory_activate_value(message.processed_plain_text) / 100
+            return interested_rate
+        except Exception as e:
+            from src.common.logger import get_module_logger
+            logger = get_module_logger("chat_bot")
+            logger.error(f"记忆激活判断失败: {e}")
+            return 0
 
     async def message_process(self, message_cq: MessageRecvCQ) -> None:
         """处理转化后的统一格式消息
@@ -121,7 +143,7 @@ class ChatBot:
 
         # 根据话题计算激活度
         topic = ""
-        interested_rate = await hippocampus.memory_activate_value(message.processed_plain_text) / 100
+        interested_rate = await self._memory_judge(message)
         logger.debug(f"对{message.processed_plain_text}的激活度:{interested_rate}")
         # logger.info(f"\033[1;32m[主题识别]\033[0m 使用{global_config.topic_extract}主题: {topic}")
 
@@ -297,7 +319,7 @@ class ChatBot:
 
             raw_message = f"[戳了戳]{global_config.BOT_NICKNAME}"  # 默认类型
             if info := event.raw_info:
-                poke_type = info[2].get("txt", "戳了戳")  # 戳戳类型，例如“拍一拍”、“揉一揉”、“捏一捏”
+                poke_type = info[2].get("txt", "戳了戳")  # 戳戳类型，例如"拍一拍"、"揉一揉"、"捏一捏"
                 custom_poke_message = info[4].get("txt", "")  # 自定义戳戳消息，若不存在会为空字符串
                 raw_message = f"[{poke_type}]{global_config.BOT_NICKNAME}{custom_poke_message}"
 

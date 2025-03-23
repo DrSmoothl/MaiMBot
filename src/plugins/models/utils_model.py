@@ -2,7 +2,7 @@ import asyncio
 import json
 import re
 from datetime import datetime
-from typing import Tuple, Union
+from typing import Tuple, Union, List
 
 import aiohttp
 from src.common.logger import get_module_logger
@@ -596,6 +596,20 @@ class LLM_request:
             response_handler=embedding_handler,
         )
         return embedding
+
+    async def send_embedding_request(self, text: str) -> List[float]:
+        """获取文本的嵌入向量（为LPMM提供的兼容接口）
+        
+        Args:
+            text: 需要获取embedding的文本
+            
+        Returns:
+            List[float]: embedding向量，如果失败则返回空列表
+        """
+        result = await self.get_embedding(text)
+        if result is None:
+            return []
+        return result
 
 
 def compress_base64_image_by_scale(base64_data: str, target_size: int = 0.8 * 1024 * 1024) -> str:

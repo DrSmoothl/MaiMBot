@@ -1,9 +1,9 @@
 import asyncio
 import time
 
-from nonebot import get_driver, on_message, on_notice, require
 from nonebot.adapters.onebot.v11 import Bot, MessageEvent, NoticeEvent
 from nonebot.typing import T_State
+from nonebot import on_message, on_notice, require, get_driver
 
 from ..moods.moods import MoodManager  # 导入情绪管理器
 from ..schedule.schedule_generator import bot_schedule
@@ -14,7 +14,9 @@ from .emoji_manager import emoji_manager
 from .relationship_manager import relationship_manager
 from ..willing.willing_manager import willing_manager
 from .chat_stream import chat_manager
-from ..memory_system.memory import hippocampus
+# 使用延迟导入避免循环引用
+# from ..memory_system.memory import hippocampus
+from ..memory_system import init_memory_instances
 from .message_sender import message_manager, message_sender
 from .storage import MessageStorage
 from src.common.logger import get_module_logger
@@ -109,30 +111,56 @@ async def _(bot: Bot, event: NoticeEvent, state: T_State):
 @scheduler.scheduled_job("interval", seconds=global_config.build_memory_interval, id="build_memory")
 async def build_memory_task():
     """每build_memory_interval秒执行一次记忆构建"""
-    logger.debug("[记忆构建]------------------------------------开始构建记忆--------------------------------------")
-    start_time = time.time()
-    await hippocampus.operation_build_memory()
-    end_time = time.time()
-    logger.success(
-        f"[记忆构建]--------------------------记忆构建完成：耗时: {end_time - start_time:.2f} "
-        "秒-------------------------------------------"
-    )
+    try:
+        logger.debug("[记忆构建]------------------------------------开始构建记忆--------------------------------------")
+        start_time = time.time()
+        # 获取记忆系统实例
+        _, hippocampus, _ = init_memory_instances()
+        if hippocampus:
+            await hippocampus.operation_build_memory()
+            end_time = time.time()
+            logger.success(
+                f"[记忆构建]--------------------------记忆构建完成：耗时: {end_time - start_time:.2f} "
+                "秒-------------------------------------------"
+            )
+        else:
+            logger.warning("记忆系统未初始化，跳过构建任务")
+    except Exception as e:
+        logger.error(f"记忆构建失败: {e}")
 
 
 @scheduler.scheduled_job("interval", seconds=global_config.forget_memory_interval, id="forget_memory")
 async def forget_memory_task():
-    """每30秒执行一次记忆构建"""
-    print("\033[1;32m[记忆遗忘]\033[0m 开始遗忘记忆...")
-    await hippocampus.operation_forget_topic(percentage=global_config.memory_forget_percentage)
-    print("\033[1;32m[记忆遗忘]\033[0m 记忆遗忘完成")
+    """每forget_memory_interval秒执行一次记忆遗忘"""
+    try:
+        logger.debug("[记忆遗忘]------------------------------------开始遗忘记忆--------------------------------------")
+        # 获取记忆系统实例
+        _, hippocampus, _ = init_memory_instances()
+        if hippocampus:
+            await hippocampus.operation_forget_topic(percentage=global_config.memory_forget_percentage)
+            logger.success("[记忆遗忘]--------------------------记忆遗忘完成--------------------------------------")
+        else:
+            logger.warning("记忆系统未初始化，跳过遗忘任务")
+    except Exception as e:
+        logger.error(f"记忆遗忘失败: {e}")
 
 
 @scheduler.scheduled_job("interval", seconds=global_config.build_memory_interval + 10, id="merge_memory")
 async def merge_memory_task():
-    """每30秒执行一次记忆构建"""
-    # print("\033[1;32m[记忆整合]\033[0m 开始整合")
-    # await hippocampus.operation_merge_memory(percentage=0.1)
-    # print("\033[1;32m[记忆整合]\033[0m 记忆整合完成")
+    """每(build_memory_interval+10)秒执行一次记忆合并"""
+    try:
+        # 暂时注释掉合并任务
+        # logger.debug("[记忆整合]------------------------------------开始整合记忆--------------------------------------")
+        # 获取记忆系统实例
+        # _, hippocampus, _ = init_memory_instances()
+        # if hippocampus:
+        #     await hippocampus.operation_merge_memory(percentage=0.1)
+        #     logger.success("[记忆整合]--------------------------记忆整合完成--------------------------------------")
+        # else:
+        #     logger.warning("记忆系统未初始化，跳过整合任务")
+        pass
+    except Exception as e:
+        logger.error(f"记忆整合失败: {e}")
 
 
 @scheduler.scheduled_job("interval", seconds=30, id="print_mood")

@@ -1,9 +1,11 @@
 import random
 import time
 from typing import Optional
+import datetime
 
 from ...common.database import db
-from ..memory_system.memory import hippocampus, memory_graph
+# from ..memory_system.memory import hippocampus, memory_graph
+from ..memory_system import init_memory_instances, memory_client, ensure_memory_system_initialized
 from ..moods.moods import MoodManager
 from ..schedule.schedule_generator import bot_schedule
 from .config import global_config
@@ -70,21 +72,73 @@ class PromptBuilder:
         # 使用新的记忆获取方法
         memory_prompt = ""
         start_time = time.time()
+        
+        # 尝试使用集成记忆系统
+        try:
+            # 确保记忆系统已初始化
+            await ensure_memory_system_initialized()
+            # 使用集成记忆客户端查询记忆
+            memories = await memory_client.query_memory(
+                query=message_txt, 
+                max_memories=global_config.memory_retrieval_max_num
+            )
+            
+            if memories:
+                # 格式化记忆内容
+                memory_items = []
+                for memory in memories:
+                    # 记录不同来源的记忆并区分LPMM和传统记忆
+                    source_tag = ""
+                    if 'source' in memory:
+                        if memory['source'] == 'lpmm':
+                            source_tag = "[LPMM记忆]"
+                        elif memory['source'] == 'traditional':
+                            source_tag = "[传统记忆]"
+                        else:
+                            source_tag = f"[{memory.get('source', '未知来源')}]"
+                    
+                    # 添加记忆时间标记（如果有）
+                    time_tag = ""
+                    if 'timestamp' in memory:
+                        try:
+                            memory_time = datetime.datetime.fromtimestamp(memory['timestamp'])
+                            time_tag = f"[{memory_time.strftime('%Y-%m-%d %H:%M')}]"
+                        except:
+                            pass
+                    
+                    memory_items.append(f"{source_tag}{time_tag} {memory['content']}")
+                
+                memory_str = "\n".join(memory_items)
+                memory_prompt = f"你回忆起：\n{memory_str}\n"
+                
+                # 打印调试信息
+                logger.debug("[集成记忆检索]找到以下相关记忆：")
+                for memory in memories:
+                    logger.debug(f"- 来源「{memory.get('source', '未知')}」[相似度: {memory.get('similarity', 0):.2f}]: {memory['content'][:50]}...")
+        except Exception as e:
+            logger.warning(f"集成记忆系统查询失败，回退到传统记忆系统: {e}")
+            
+            # 回退到传统记忆系统
+            try:
+                # 获取记忆系统实例
+                _, hippocampus, _ = init_memory_instances()
+                
+                if hippocampus:
+                    relevant_memories = await hippocampus.get_relevant_memories(
+                        text=message_txt, max_topics=3, similarity_threshold=0.5, max_memory_num=4
+                    )
 
-        # 调用 hippocampus 的 get_relevant_memories 方法
-        relevant_memories = await hippocampus.get_relevant_memories(
-            text=message_txt, max_topics=3, similarity_threshold=0.5, max_memory_num=4
-        )
+                    if relevant_memories:
+                        # 格式化记忆内容
+                        memory_str = "\n".join(m["content"] for m in relevant_memories)
+                        memory_prompt = f"你回忆起：\n{memory_str}\n"
 
-        if relevant_memories:
-            # 格式化记忆内容
-            memory_str = "\n".join(m["content"] for m in relevant_memories)
-            memory_prompt = f"你回忆起：\n{memory_str}\n"
-
-            # 打印调试信息
-            logger.debug("[记忆检索]找到以下相关记忆：")
-            for memory in relevant_memories:
-                logger.debug(f"- 主题「{memory['topic']}」[相似度: {memory['similarity']:.2f}]: {memory['content']}")
+                        # 打印调试信息
+                        logger.debug("[传统记忆检索]找到以下相关记忆：")
+                        for memory in relevant_memories:
+                            logger.debug(f"- 主题「{memory['topic']}」[相似度: {memory['similarity']:.2f}]: {memory['content'][:50]}...")
+            except Exception as e:
+                logger.error(f"传统记忆系统查询也失败了: {e}")
 
         end_time = time.time()
         logger.info(f"回忆耗时: {(end_time - start_time):.3f}秒")
@@ -187,10 +241,18 @@ class PromptBuilder:
         # print(f"\033[1;34m[调试]\033[0m 已从数据库获取群 {group_id} 的消息记录:{chat_talking_prompt}")
 
         # 获取主动发言的话题
-        all_nodes = memory_graph.dots
-        all_nodes = filter(lambda dot: len(dot[1]["memory_items"]) > 3, all_nodes)
-        nodes_for_select = random.sample(all_nodes, 5)
-        topics = [info[0] for info in nodes_for_select]
+        try:
+            # 获取记忆系统实例
+            memory_graph, _, _ = init_memory_instances()
+            
+            all_nodes = memory_graph.dots
+            all_nodes = filter(lambda dot: len(dot[1]["memory_items"]) > 3, all_nodes)
+            nodes_for_select = random.sample(all_nodes, 5)
+            topics = [info[0] for info in nodes_for_select]
+        except Exception as e:
+            logger.error(f"获取记忆图节点失败: {e}")
+            topics = ["学习", "生活", "兴趣", "美食", "音乐"]  # 默认话题
+            nodes_for_select = [{"concept": topic, "memory_items": [f"关于{topic}的记忆"]} for topic in topics]
 
         # 激活prompt构建
         activate_prompt = ""
@@ -240,7 +302,7 @@ class PromptBuilder:
         related_info = ""
         logger.debug(f"获取知识库内容，元消息：{message[:30]}...，消息长度: {len(message)}")
         embedding = await get_embedding(message)
-        related_info += self.get_info_from_db(embedding, threshold=threshold)
+        related_info += self.get_info_from_db(embedding, limit=1, threshold=threshold)
 
         return related_info
 
